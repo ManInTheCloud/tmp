@@ -16,6 +16,7 @@ from math import sqrt
 
 data=pd.read_csv('./input/full_chinese_dataframe.csv')
 
+
 all_labels=['口语交际','连词成句','传记阅读','怀古咏史诗','一般实用类阅读',
             '山水田园诗','词性','叙事诗','仿写','语段综合考查','字音',
             '选用、仿用和变换句式','说明方法','文言实词','扩写','散文阅读',
@@ -30,11 +31,11 @@ all_labels=['口语交际','连词成句','传记阅读','怀古咏史诗','一�
             '文言虚词','报告阅读','一词多义','表达简明、连贯、得体','翻译句子',
             '综合读写','文言文阅读','材料作文','构词方式','宫怨诗','古今异义',
             '理解句子','通假字']
-			
+
+
 def process_sentence_char(sentence,fre_char,padding_char='PAD',length=400):
-    '''将句子处理为固定长度length，不足的添加padding，大于length的取首尾length/2长度'''
     sentence=sentence.split()
-    sentence=[x for x in sentence if fre_char[x]==1]    #将低频字符过滤
+    sentence=[x for x in sentence if fre_char[x]==1]
     sen_len=len(sentence)
     if sen_len>length:
         sentence=sentence[:int(length/2)]+sentence[int(-length/2):]
@@ -43,18 +44,17 @@ def process_sentence_char(sentence,fre_char,padding_char='PAD',length=400):
     return np.array(sentence).reshape([1,length])
 
 def all_char(sentences):
-    '''获取训练集中的所有字符'''
     char_count=dict(Counter(itertools.chain(*sentences)))
-    chars=[char for char in char_count.keys()]
-    return chars
+    char=[char for char in char_count.keys()]
+    return char
 
-all_of_char=all_char(data.char.apply(lambda x:x.split()).values)       #得到所有字符
+all_of_char=all_char(data.char.apply(lambda x:x.split()).values)
 model=word2vec.Word2Vec.load('./model/chinese_char_128dim_50epoch_model')
-model.init_sims()    # compute normalized vector
+model.init_sims()
 fre_char={}.fromkeys(all_of_char,0)
-model_char=tuple(model.wv.vocab.keys())    #训练模型时去除了频率小于10的字符，model_char为频率大于10的字符
+model_char=tuple(model.wv.vocab.keys())
 for char in model_char:
-    fre_char[char]=1            #将所有字符中频率大于10的标记为1
+    fre_char[char]=1
     
 test=data.loc[data.train==0].reset_index(drop=True)
 train=data.loc[data.train==1].reset_index(drop=True)
@@ -62,17 +62,19 @@ train_X=train.char.apply(lambda x:process_sentence_char(x,fre_char))
 train_y=train[all_labels].astype(np.float32).as_matrix()
 test_X=test.char.apply(lambda x:process_sentence_char(x,fre_char))
 test_y=test[all_labels].astype(np.float32).as_matrix()
+x_train=np.concatenate(train_X)
+x_dev=np.concatenate(test_X)
 
-train_X=np.concatenate(train_X)
-test_X=np.concatenate(test_X)
-
-embedding=np.zeros([len(model_char)+1,128],dtype=np.float32) #构造embedding matrix，+1是'PAD'对应的zero vector
+embedding=np.zeros([len(model_char)+1,128],dtype=np.float32)
 
 for index,char in enumerate(model_char):
     embedding[index]=model.wv.word_vec(char,use_norm=True)
-	
+
+np.save('./input/chinese_char_embedding.npy',embedding)
+
+embedding=np.load('./input/chinese_char_embedding.npy')
 model_char+=('PAD',)
-	
+
 def count_precision_recall_at_k(y_pred, y_true, k):
     """
     y_pred: [[ 1.3315865   0.71527897 -1.54540029 -0.00838385  0.62133597 -0.72008556]]
@@ -110,7 +112,7 @@ class TextCNN_1(object):
         
         # Placeholder for input,output,dropout
         with tf.name_scope('input_layer'):
-            self.input_x=tf.placeholder(tf.string,[None,sequence_length],name='input_x') #输入为字符
+            self.input_x=tf.placeholder(tf.string,[None,sequence_length],name='input_x')
             self.input_y=tf.placeholder(tf.float32,[None,num_classes],name='input_y')
             self.dropout_keep_prob=tf.placeholder(tf.float32,name='dropout_keep_prob')
         
@@ -127,7 +129,7 @@ class TextCNN_1(object):
                 self.W=tf.Variable(tf.truncated_normal([len(vocab),embedding_size],stddev=0.1),name='raw_W',dtype=tf.float32)
             mapping_strings=tf.constant(vocab)
             table=tf.contrib.lookup.index_table_from_tensor(mapping=mapping_strings)
-            ids=table.lookup(self.input_x)    #将输入的字符转化为对应的index
+            ids=table.lookup(self.input_x)
             tf.tables_initializer().run()
             self.embedded_chars=tf.nn.embedding_lookup(self.W,ids)
             x=tf.expand_dims(self.embedded_chars,-1)
@@ -186,6 +188,7 @@ class TextCNN_1(object):
 			
 def batch_iter(X,y,batch_size,num_epochs,shuffle=True):
     data_size=len(X)
+    assert len(X)==len(y)
     num_batches_per_epoch=int((data_size-1)/batch_size)+1
     for epoch in range(num_epochs):
         # shuffle the data at each epoch
@@ -196,8 +199,8 @@ def batch_iter(X,y,batch_size,num_epochs,shuffle=True):
         for batch_num in range(num_batches_per_epoch):
             start_index=batch_num*batch_size
             end_index=min((batch_num+1)*batch_size,data_size)
-            yield X[start_index:end_index],y[start_index:end_index]
-			
+            yield X[start_index:end_index],y[start_index:end_index]	
+	
 def train(x_train,y_train,x_dev,y_dev,batch_size,epoch):
     with tf.Graph().as_default():
         sess=tf.Session()
@@ -278,7 +281,12 @@ def train(x_train,y_train,x_dev,y_dev,batch_size,epoch):
                 train_step(x_batch,y_batch)
                 current_step=tf.train.global_step(sess,global_step)
                 if current_step%num_batches_per_epoch==0:
-                    y_pred,y_true=dev_step(x_dev,y_dev,writer=dev_summary_writer)
-                    print(count_precision_recall_at_k(y_pred, y_true, 1))
-					
-train(train_X,train_y,test_X,test_y,64,10)
+                    y_pred,y_true=dev_step(x_batch,y_batch,writer=dev_summary_writer)
+                    print(y_pred.shape)
+                    print(count_precision_recall_at_k(y_pred, y_batch, 1))
+                    #sess.close()
+                    #return 0
+
+if __name__=='__main__':
+	#train(x_train,train_y,x_dev,test_y,64,20)
+	train(x_train,train_y,x_train[:1000],train_y[:1000],64,20)
